@@ -23,5 +23,9 @@ public class DashboardActivity extends AppCompatActivity {
 
         MaterialCardView settingsCard = findViewById(R.id.settings_card);
         settingsCard.setOnClickListener(v -> startActivity(new Intent(DashboardActivity.this, SettingsActivity.class)));
+
+        // Button to explore games from REST API
+        MaterialCardView exploreApiCard = findViewById(R.id.explore_api_card);
+        exploreApiCard.setOnClickListener(v -> startActivity(new Intent(DashboardActivity.this, ApiGamesActivity.class)));
     }
 }
