@@ -5,9 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- For picking images on newer Android versions, READ_EXTERNAL_STORAGE is often not needed with Intent.ACTION_PICK or GET_CONTENT,
-         but for broader compatibility or direct file access, it's sometimes included.
-         Starting Android 13, specific media permissions are used. For simplicity, we'll use the Intent-based picker. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"

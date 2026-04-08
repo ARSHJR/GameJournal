@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.view.LayoutInflater;
@@ -24,12 +25,18 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 public class GamesActivity extends AppCompatActivity {
 
@@ -47,6 +54,7 @@ public class GamesActivity extends AppCompatActivity {
 
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private static final int PICK_IMAGE_REQUEST = 101;
+    private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 102;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,36 +96,96 @@ public class GamesActivity extends AppCompatActivity {
         Button saveBtn = view.findViewById(R.id.dialog_save_button);
         Button cancelBtn = view.findViewById(R.id.dialog_cancel_button);
 
+        MaterialButtonToggleGroup modeToggle = view.findViewById(R.id.dialog_mode_toggle_group);
+        LinearLayout reminderOptionsContainer = view.findViewById(R.id.reminder_options_container);
+        ChipGroup frequencyChips = view.findViewById(R.id.reminder_frequency_chips);
+
         AlertDialog dialog = builder.create();
+
+        // Toggle between Note and Reminder modes
+        modeToggle.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (isChecked) {
+                if (checkedId == R.id.btn_mode_reminder) {
+                    reminderOptionsContainer.setVisibility(View.VISIBLE);
+                } else {
+                    reminderOptionsContainer.setVisibility(View.GONE);
+                }
+            }
+        });
 
         locationBtn.setOnClickListener(v -> checkLocationPermissions());
         imageBtn.setOnClickListener(v -> openGallery());
-        
+
         cancelBtn.setOnClickListener(v -> {
             resetDialogState();
             dialog.dismiss();
         });
 
         saveBtn.setOnClickListener(v -> {
-            String title = titleInput.getText().toString();
-            if (title.isEmpty()) {
-                Toast.makeText(this, "Title is required", Toast.LENGTH_SHORT).show();
-                return;
+            int checkedModeId = modeToggle.getCheckedButtonId();
+
+            if (checkedModeId == R.id.btn_mode_reminder) {
+                // Reminder mode
+                int checkedChipId = frequencyChips.getCheckedChipId();
+                if (checkedChipId == View.NO_ID) {
+                    Toast.makeText(this, "Please select a reminder frequency", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                long intervalMinutes = getIntervalMinutes(checkedChipId);
+                scheduleReminder(intervalMinutes);
+                resetDialogState();
+                dialog.dismiss();
+                Toast.makeText(this, "Reminder set!", Toast.LENGTH_SHORT).show();
+            } else {
+                // Note mode — existing behaviour
+                String title = titleInput.getText().toString();
+                if (title.isEmpty()) {
+                    Toast.makeText(this, "Title is required", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String notes = notesInput.getText().toString();
+                String imgUri = (selectedImageUri != null) ? selectedImageUri.toString() : null;
+                gameList.add(new GameItem(title, notes, "Tracked", imgUri, currentFetchedLocation));
+                adapter.notifyItemInserted(gameList.size() - 1);
+                updateUI();
+                resetDialogState();
+                dialog.dismiss();
+                Toast.makeText(this, "Game added to library", Toast.LENGTH_SHORT).show();
             }
-            String notes = notesInput.getText().toString();
-            String imgUri = (selectedImageUri != null) ? selectedImageUri.toString() : null;
-            
-            // Minimal model usage: storing title, notes, status, imageUri, location
-            gameList.add(new GameItem(title, notes, "Tracked", imgUri, currentFetchedLocation));
-            adapter.notifyItemInserted(gameList.size() - 1);
-            updateUI();
-            
-            resetDialogState();
-            dialog.dismiss();
-            Toast.makeText(this, "Game added to library", Toast.LENGTH_SHORT).show();
         });
 
         dialog.show();
+    }
+
+    private long getIntervalMinutes(int chipId) {
+        if (chipId == R.id.chip_5min)  return 5;
+        if (chipId == R.id.chip_20min) return 20;
+        if (chipId == R.id.chip_1hour) return 60;
+        if (chipId == R.id.chip_6hour) return 360;
+        if (chipId == R.id.chip_1day)  return 1440;
+        return 60; // fallback
+    }
+
+    private void scheduleReminder(long intervalMinutes) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        NOTIFICATION_PERMISSION_REQUEST_CODE);
+                // Permission may be granted async; schedule anyway — WorkManager will fire when ready
+            }
+        }
+
+        PeriodicWorkRequest reminderRequest = new PeriodicWorkRequest.Builder(
+                ReminderWorker.class, intervalMinutes, TimeUnit.MINUTES)
+                .build();
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "game_reminder",
+                ExistingPeriodicWorkPolicy.REPLACE,
+                reminderRequest
+        );
     }
 
     private void showDetailDialog(int position) {
@@ -149,6 +217,8 @@ public class GamesActivity extends AppCompatActivity {
         view.findViewById(R.id.dialog_get_location_button).setVisibility(View.GONE);
         view.findViewById(R.id.dialog_choose_image_button).setVisibility(View.GONE);
         view.findViewById(R.id.dialog_save_button).setVisibility(View.GONE);
+        view.findViewById(R.id.dialog_mode_toggle_group).setVisibility(View.GONE);
+        view.findViewById(R.id.reminder_options_container).setVisibility(View.GONE);
         ((Button)view.findViewById(R.id.dialog_cancel_button)).setText("CLOSE");
         
         AlertDialog dialog = builder.create();
